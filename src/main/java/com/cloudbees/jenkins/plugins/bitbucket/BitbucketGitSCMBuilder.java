@@ -39,8 +39,15 @@ import com.cloudbees.plugins.credentials.common.StandardCredentials;
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.Util;
+import hudson.model.Run;
+import hudson.model.TaskListener;
+import hudson.plugins.git.GitException;
 import hudson.plugins.git.GitSCM;
+import hudson.plugins.git.Revision;
 import hudson.plugins.git.browser.BitbucketWeb;
+import hudson.plugins.git.extensions.GitSCMChangelogExtension;
+
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -53,6 +60,8 @@ import jenkins.scm.api.SCMSource;
 import jenkins.scm.api.mixin.ChangeRequestCheckoutStrategy;
 import jenkins.scm.api.mixin.TagSCMHead;
 import org.apache.commons.lang.StringUtils;
+import org.jenkinsci.plugins.gitclient.ChangelogCommand;
+import org.jenkinsci.plugins.gitclient.GitClient;
 
 /**
  * A {@link GitSCMBuilder} specialized for bitbucket.
@@ -264,6 +273,9 @@ public class BitbucketGitSCMBuilder extends GitSCMBuilder<BitbucketGitSCMBuilder
                         "+refs/heads/" + name + ":refs/remotes/@{remote}/" + localName);
                 if ((r instanceof PullRequestSCMRevision)
                         && ((PullRequestSCMRevision) r).getTarget() instanceof AbstractGitSCMSource.SCMRevisionImpl) {
+                    String targetHash = ((AbstractGitSCMSource.SCMRevisionImpl) ((PullRequestSCMRevision) r).getTarget())
+                            .getHash();
+                    withExtension(new GitSCMPullRequestChangelogExtension(targetHash));
                     withExtension(new MergeWithGitSCMExtension("remotes/" + remoteName + "/" + localName,
                             ((AbstractGitSCMSource.SCMRevisionImpl) ((PullRequestSCMRevision) r).getTarget())
                                     .getHash()));
@@ -271,8 +283,29 @@ public class BitbucketGitSCMBuilder extends GitSCMBuilder<BitbucketGitSCMBuilder
                     withExtension(new MergeWithGitSCMExtension("remotes/" + remoteName + "/" + localName, null));
                 }
             }
+            // else head.getCheckoutStrategy() != ChangeRequestCheckoutStrategy.MERGE)
+            // TODO Compute changelog of change request without target
         }
         return this;
+    }
+
+    /**
+     * Compute changelog of pull request.
+     */
+    static final class GitSCMPullRequestChangelogExtension extends GitSCMChangelogExtension {
+        final String targetHash;
+
+        public GitSCMPullRequestChangelogExtension(String targetHash) {
+            this.targetHash = targetHash;
+        }
+
+        @Override
+        public boolean decorateChangelogCommand(GitSCM gitSCM, Run<?, ?> run, GitClient git, TaskListener taskListener, ChangelogCommand cmd, Revision revToBuild) throws IOException, InterruptedException, GitException {
+            taskListener.getLogger().println("Using 'Changelog for PullRequest' strategy.");
+            cmd.includes(revToBuild.getSha1());
+            cmd.excludes(targetHash);
+            return true;
+        }
     }
 
     /**
